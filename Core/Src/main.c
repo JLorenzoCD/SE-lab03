@@ -1,29 +1,32 @@
 /* USER CODE BEGIN Header */
 /**
-  ******************************************************************************
-  * @file           : main.c
-  * @brief          : Main program body
-  ******************************************************************************
-  * @attention
-  *
-  * Copyright (c) 2026 STMicroelectronics.
-  * All rights reserved.
-  *
-  * This software is licensed under terms that can be found in the LICENSE file
-  * in the root directory of this software component.
-  * If no LICENSE file comes with this software, it is provided AS-IS.
-  *
-  ******************************************************************************
-  */
+ ******************************************************************************
+ * @file           : main.c
+ * @brief          : Main program body
+ ******************************************************************************
+ * @attention
+ *
+ * Copyright (c) 2026 STMicroelectronics.
+ * All rights reserved.
+ *
+ * This software is licensed under terms that can be found in the LICENSE file
+ * in the root directory of this software component.
+ * If no LICENSE file comes with this software, it is provided AS-IS.
+ *
+ ******************************************************************************
+ */
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "adc.h"
 #include "tim.h"
 #include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "HC_SR04.h"
+#include "lm35.h"
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -45,7 +48,8 @@
 
 /* USER CODE BEGIN PV */
 
-HCSR04_HandleTypeDef sensor;
+HCSR04_HandleTypeDef hcsr04_sensor;
+LM35_HandleTypeDef lm35_sensor_1;
 
 /* USER CODE END PV */
 
@@ -90,48 +94,56 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_TIM2_Init();
+  MX_ADC1_Init();
   /* USER CODE BEGIN 2 */
-  HAL_TIM_IC_Start_IT(&htim2, TIM_CHANNEL_1);
+	HAL_TIM_IC_Start_IT(&htim2, TIM_CHANNEL_1);
 
-  sensor.htim = &htim2;
-  sensor.IC_Channel = TIM_CHANNEL_1;
-  sensor.Trig_Pin = Trigger_Pin;
-  sensor.Trig_Port = Trigger_GPIO_Port;
+	hcsr04_sensor.htim = &htim2;
+	hcsr04_sensor.IC_Channel = TIM_CHANNEL_1;
+	hcsr04_sensor.Trig_Pin = Trigger_Pin;
+	hcsr04_sensor.Trig_Port = Trigger_GPIO_Port;
 
-  hcsr04_init(&sensor);
+	hcsr04_init(&hcsr04_sensor);
+	LM35_Init(&lm35_sensor_1, &hadc1, ADC_CHANNEL_1);
 
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  uint8_t is_measurement = 0;
-  uint32_t last_tick = 0;
-  while (1)
-  {
-	  if(!is_measurement && (HAL_GetTick() - last_tick > 100)) {
-		  is_measurement = 1;
+	uint8_t hcsr04_is_measurement = 0;
+	uint32_t hcsr04_last_tick_read = 0;
 
-		  hcsr04_start_measurement(&sensor);
-	  } else if (hcsr04_is_data_ready(&sensor)) {
-		  is_measurement = 0;
-		  last_tick = HAL_GetTick();
+	uint8_t lm35_1_is_measurement = 0;
+	uint32_t lm35_1_last_tick_read = 0;
+	float lm35_1_temp = 0.0f;
 
-		  float distance = hcsr04_get_distance_cm(&sensor);
+	while (1) {
+		if (!hcsr04_is_measurement
+				&& (HAL_GetTick() - hcsr04_last_tick_read > 100)) {
+			hcsr04_is_measurement = 1;
 
-		  HAL_GPIO_WritePin(LD5_GPIO_Port, LD3_Pin|LD4_Pin|LD5_Pin|LD6_Pin, GPIO_PIN_RESET);
-		  if (distance < 20.0) {
-			  HAL_GPIO_WritePin(LD5_GPIO_Port, LD5_Pin, GPIO_PIN_SET);
-		  } else if (distance < 50.0) {
-			  HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
-		  } else {
-			  HAL_GPIO_WritePin(LD4_GPIO_Port, LD4_Pin, GPIO_PIN_SET);
-		  }
-	  }
-	  // TIMEOUT DE SEGURIDAD: Si pasan más de 100ms esperando el eco y se colgó, liberamos el flag
-		else if (is_measurement && (HAL_GetTick() - last_tick > 150))
-		{
-			is_measurement = 0; // Fuerza a reintentar en el siguiente ciclo
-			last_tick = HAL_GetTick();
+			// hcsr04_start_measurement(&hcsr04_sensor);
+		} else if (hcsr04_is_data_ready(&hcsr04_sensor)) {
+			hcsr04_is_measurement = 0;
+			hcsr04_last_tick_read = HAL_GetTick();
+
+			float distance = hcsr04_get_distance_cm(&hcsr04_sensor);
+
+			HAL_GPIO_WritePin(LD5_GPIO_Port,
+					LD3_Pin | LD4_Pin | LD5_Pin | LD6_Pin, GPIO_PIN_RESET);
+			if (distance < 20.0) {
+				HAL_GPIO_WritePin(LD5_GPIO_Port, LD5_Pin, GPIO_PIN_SET);
+			} else if (distance < 50.0) {
+				HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
+			} else {
+				HAL_GPIO_WritePin(LD4_GPIO_Port, LD4_Pin, GPIO_PIN_SET);
+			}
+		}
+		// TIMEOUT DE SEGURIDAD: Si pasan más de 100ms esperando el eco y se colgó, liberamos el flag
+		else if (hcsr04_is_measurement
+				&& (HAL_GetTick() - hcsr04_last_tick_read > 150)) {
+			hcsr04_is_measurement = 0; // Fuerza a reintentar en el siguiente ciclo
+			hcsr04_last_tick_read = HAL_GetTick();
 
 			// Limpiar channel del timer
 			HAL_TIM_IC_Stop_IT(&htim2, TIM_CHANNEL_1);
@@ -139,7 +151,25 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-  }
+
+		if (!lm35_1_is_measurement
+				&& (HAL_GetTick() - lm35_1_last_tick_read > 100)) {
+			lm35_1_is_measurement = 1;
+
+			LM35_Start_Conversion(&lm35_sensor_1);
+		} else if (LM35_Get_Temperature(&lm35_sensor_1, &lm35_1_temp)) {
+			lm35_1_is_measurement = 0;
+			lm35_1_last_tick_read = HAL_GetTick();
+
+			HAL_GPIO_WritePin(LD5_GPIO_Port,
+					LD3_Pin | LD4_Pin | LD5_Pin | LD6_Pin, GPIO_PIN_RESET);
+			if (lm35_1_temp < 30.0f) {
+				HAL_GPIO_WritePin(LD4_GPIO_Port, LD4_Pin, GPIO_PIN_SET);
+			} else if (lm35_1_temp < 33.0f) {
+				HAL_GPIO_WritePin(LD5_GPIO_Port, LD5_Pin, GPIO_PIN_SET);
+			}
+		}
+	}
   /* USER CODE END 3 */
 }
 
@@ -186,8 +216,8 @@ void SystemClock_Config(void)
 
 /* USER CODE BEGIN 4 */
 
-void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim){
-	hcsr04_tim_ic_callback(&sensor, htim);
+void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim) {
+	// hcsr04_tim_ic_callback(&hcsr04_sensor, htim);
 }
 
 /* USER CODE END 4 */
@@ -199,11 +229,10 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim){
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
-  /* User can add his own implementation to report the HAL error return state */
-  __disable_irq();
-  while (1)
-  {
-  }
+	/* User can add his own implementation to report the HAL error return state */
+	__disable_irq();
+	while (1) {
+	}
   /* USER CODE END Error_Handler_Debug */
 }
 #ifdef USE_FULL_ASSERT
