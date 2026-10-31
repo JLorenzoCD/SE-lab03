@@ -130,6 +130,9 @@ int main(void)
 	uint32_t lm35_1_last_tick_read = 0;
 	float lm35_1_temp = 0.0f;
 
+	uint8_t heartbeat_is_blinking = 0;
+	uint32_t heartbeat_last_tick_read = 0;
+
 	while (1) {
 		// Sensor ultrasonico HC-SR04
 		if (!hcsr04_is_measurement
@@ -193,7 +196,7 @@ int main(void)
 				HAL_GPIO_WritePin(LD5_GPIO_Port, LD5_Pin, GPIO_PIN_SET);
 				HAL_GPIO_WritePin(LD4_GPIO_Port, LD4_Pin, GPIO_PIN_RESET);
 			} else if (y > ACCEL_Y_UMBRAL) {
-				HAL_GPIO_WritePin(LD6_GPIO_Port, LD6_Pin, GPIO_PIN_SET);
+				// HAL_GPIO_WritePin(LD6_GPIO_Port, LD6_Pin, GPIO_PIN_SET);
 				HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
 			} else if (y < -ACCEL_Y_UMBRAL) {
 				HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
@@ -201,6 +204,17 @@ int main(void)
 			} else {
 				HAL_GPIO_WritePin(GPIOD, LD3_Pin|LD4_Pin|LD5_Pin|LD6_Pin, GPIO_PIN_RESET);
 			}
+		}
+
+		if (HAL_GetTick() - heartbeat_last_tick_read > 500) {
+			heartbeat_last_tick_read = HAL_GetTick();
+			heartbeat_is_blinking = !heartbeat_is_blinking;
+		}
+
+		if (heartbeat_is_blinking) {
+			HAL_GPIO_WritePin(LD6_GPIO_Port, LD6_Pin, GPIO_PIN_SET);
+		} else {
+			HAL_GPIO_WritePin(LD6_GPIO_Port, LD6_Pin, GPIO_PIN_RESET);
 		}
 
 	}
