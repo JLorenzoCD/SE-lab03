@@ -19,11 +19,14 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "adc.h"
+#include "i2c.h"
+#include "spi.h"
 #include "tim.h"
 #include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "stm32f4_discovery_accelerometer.h"
 #include "HC_SR04.h"
 #include "lm35.h"
 
@@ -50,6 +53,8 @@
 
 HCSR04_HandleTypeDef hcsr04_sensor;
 LM35_HandleTypeDef lm35_sensor_1;
+
+int16_t accel_data_xyz[3];
 
 /* USER CODE END PV */
 
@@ -95,7 +100,11 @@ int main(void)
   MX_GPIO_Init();
   MX_TIM2_Init();
   MX_ADC1_Init();
+  MX_SPI1_Init();
+  MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
+	BSP_ACCELERO_Init();
+
 	HAL_TIM_IC_Start_IT(&htim2, TIM_CHANNEL_1);
 
 	hcsr04_sensor.htim = &htim2;
@@ -110,6 +119,10 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+	uint32_t accel_last_tick_read = 0;
+	const int16_t ACCEL_X_UMBRAL = 100;
+	const int16_t ACCEL_Y_UMBRAL = 100;
+
 	uint8_t hcsr04_is_measurement = 0;
 	uint32_t hcsr04_last_tick_read = 0;
 
@@ -118,6 +131,7 @@ int main(void)
 	float lm35_1_temp = 0.0f;
 
 	while (1) {
+		// Sensor ultrasonico HC-SR04
 		if (!hcsr04_is_measurement
 				&& (HAL_GetTick() - hcsr04_last_tick_read > 100)) {
 			hcsr04_is_measurement = 1;
@@ -148,27 +162,47 @@ int main(void)
 			// Limpiar channel del timer
 			HAL_TIM_IC_Stop_IT(&htim2, TIM_CHANNEL_1);
 		}
-    /* USER CODE END WHILE */
 
-    /* USER CODE BEGIN 3 */
-
+		// Sensor de temperatura LM35
 		if (!lm35_1_is_measurement
 				&& (HAL_GetTick() - lm35_1_last_tick_read > 100)) {
 			lm35_1_is_measurement = 1;
 
-			LM35_Start_Conversion(&lm35_sensor_1);
+			// LM35_Start_Conversion(&lm35_sensor_1);
 		} else if (LM35_Get_Temperature(&lm35_sensor_1, &lm35_1_temp)) {
 			lm35_1_is_measurement = 0;
 			lm35_1_last_tick_read = HAL_GetTick();
 
-			HAL_GPIO_WritePin(LD5_GPIO_Port,
-					LD3_Pin | LD4_Pin | LD5_Pin | LD6_Pin, GPIO_PIN_RESET);
-			if (lm35_1_temp < 30.0f) {
+			lm35_1_temp += 0.0001f;
+		}
+    /* USER CODE END WHILE */
+
+    /* USER CODE BEGIN 3 */
+
+		if (HAL_GetTick() - accel_last_tick_read > 50) {
+			BSP_ACCELERO_GetXYZ(accel_data_xyz);
+
+			int16_t x = accel_data_xyz[0];
+			int16_t y = accel_data_xyz[1];
+			// int16_t z = accel_data[2];
+
+			if (x > ACCEL_X_UMBRAL) {
 				HAL_GPIO_WritePin(LD4_GPIO_Port, LD4_Pin, GPIO_PIN_SET);
-			} else if (lm35_1_temp < 33.0f) {
+				HAL_GPIO_WritePin(LD5_GPIO_Port, LD5_Pin, GPIO_PIN_RESET);
+			} else if (x < -ACCEL_X_UMBRAL) {
 				HAL_GPIO_WritePin(LD5_GPIO_Port, LD5_Pin, GPIO_PIN_SET);
+				HAL_GPIO_WritePin(LD4_GPIO_Port, LD4_Pin, GPIO_PIN_RESET);
+			} else if (y > ACCEL_Y_UMBRAL) {
+				HAL_GPIO_WritePin(LD6_GPIO_Port, LD6_Pin, GPIO_PIN_SET);
+				HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
+			} else if (y < -ACCEL_Y_UMBRAL) {
+				HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
+				HAL_GPIO_WritePin(LD6_GPIO_Port, LD6_Pin, GPIO_PIN_RESET);
+			} else {
+				HAL_GPIO_WritePin(GPIOD, LD3_Pin|LD4_Pin|LD5_Pin|LD6_Pin, GPIO_PIN_RESET);
 			}
 		}
+
 	}
   /* USER CODE END 3 */
 }
