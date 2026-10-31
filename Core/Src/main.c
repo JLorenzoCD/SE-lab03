@@ -39,6 +39,14 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define ACCEL_MESURAMENT_INTERVALE_MS 50
+#define ACCEL_X_UMBRAL 100
+#define ACCEL_Y_UMBRAL 100
+
+#define HCSR04_MESURAMENT_INTERVALE_MS 100
+#define HCSR04_TIMEOUT_ECO_MS 150
+#define LM35_MESURAMENT_INTERVALE_MS 1000
+#define ALARM_INTERVALE_MS 100
 
 /* USER CODE END PD */
 
@@ -120,8 +128,6 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
 	uint32_t accel_last_tick_read = 0;
-	const int16_t ACCEL_X_UMBRAL = 100;
-	const int16_t ACCEL_Y_UMBRAL = 100;
 
 	uint8_t hcsr04_is_measurement = 0;
 	uint32_t hcsr04_last_tick_read = 0;
@@ -130,35 +136,33 @@ int main(void)
 	uint32_t lm35_1_last_tick_read = 0;
 	float lm35_1_temp = 0.0f;
 
-	uint8_t heartbeat_is_blinking = 0;
-	uint32_t heartbeat_last_tick_read = 0;
+	uint8_t is_active_obstacle_alarm = 0;
+	uint8_t alarm_is_blinking = 0;
+	uint32_t alarm_last_tick_read = 0;
 
 	while (1) {
 		// Sensor ultrasonico HC-SR04
 		if (!hcsr04_is_measurement
-				&& (HAL_GetTick() - hcsr04_last_tick_read > 100)) {
+				&& (HAL_GetTick() - hcsr04_last_tick_read > HCSR04_MESURAMENT_INTERVALE_MS)) {
 			hcsr04_is_measurement = 1;
 
-			// hcsr04_start_measurement(&hcsr04_sensor);
+			hcsr04_start_measurement(&hcsr04_sensor);
 		} else if (hcsr04_is_data_ready(&hcsr04_sensor)) {
 			hcsr04_is_measurement = 0;
 			hcsr04_last_tick_read = HAL_GetTick();
 
 			float distance = hcsr04_get_distance_cm(&hcsr04_sensor);
 
-			HAL_GPIO_WritePin(LD5_GPIO_Port,
-					LD3_Pin | LD4_Pin | LD5_Pin | LD6_Pin, GPIO_PIN_RESET);
-			if (distance < 20.0) {
-				HAL_GPIO_WritePin(LD5_GPIO_Port, LD5_Pin, GPIO_PIN_SET);
-			} else if (distance < 50.0) {
-				HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
+			if (distance > 15.0) {
+				is_active_obstacle_alarm = 0;
+				alarm_is_blinking = 0;
 			} else {
-				HAL_GPIO_WritePin(LD4_GPIO_Port, LD4_Pin, GPIO_PIN_SET);
+				is_active_obstacle_alarm = 1;
 			}
-		}
-		// TIMEOUT DE SEGURIDAD: Si pasan más de 100ms esperando el eco y se colgó, liberamos el flag
-		else if (hcsr04_is_measurement
-				&& (HAL_GetTick() - hcsr04_last_tick_read > 150)) {
+		} else if (hcsr04_is_measurement
+				&& (HAL_GetTick() - hcsr04_last_tick_read > HCSR04_TIMEOUT_ECO_MS)) {
+			// TIMEOUT DE SEGURIDAD (más de 100ms esperando el eco)
+
 			hcsr04_is_measurement = 0; // Fuerza a reintentar en el siguiente ciclo
 			hcsr04_last_tick_read = HAL_GetTick();
 
@@ -168,10 +172,10 @@ int main(void)
 
 		// Sensor de temperatura LM35
 		if (!lm35_1_is_measurement
-				&& (HAL_GetTick() - lm35_1_last_tick_read > 100)) {
+				&& (HAL_GetTick() - lm35_1_last_tick_read > LM35_MESURAMENT_INTERVALE_MS)) {
 			lm35_1_is_measurement = 1;
 
-			// LM35_Start_Conversion(&lm35_sensor_1);
+			LM35_Start_Conversion(&lm35_sensor_1);
 		} else if (LM35_Get_Temperature(&lm35_sensor_1, &lm35_1_temp)) {
 			lm35_1_is_measurement = 0;
 			lm35_1_last_tick_read = HAL_GetTick();
@@ -182,7 +186,7 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 
-		if (HAL_GetTick() - accel_last_tick_read > 50) {
+		if (HAL_GetTick() - accel_last_tick_read > ACCEL_MESURAMENT_INTERVALE_MS) {
 			BSP_ACCELERO_GetXYZ(accel_data_xyz);
 
 			int16_t x = accel_data_xyz[0];
@@ -196,7 +200,9 @@ int main(void)
 				HAL_GPIO_WritePin(LD5_GPIO_Port, LD5_Pin, GPIO_PIN_SET);
 				HAL_GPIO_WritePin(LD4_GPIO_Port, LD4_Pin, GPIO_PIN_RESET);
 			} else if (y > ACCEL_Y_UMBRAL) {
-				// HAL_GPIO_WritePin(LD6_GPIO_Port, LD6_Pin, GPIO_PIN_SET);
+				if (!is_active_obstacle_alarm) {
+					HAL_GPIO_WritePin(LD6_GPIO_Port, LD6_Pin, GPIO_PIN_SET);
+				}
 				HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
 			} else if (y < -ACCEL_Y_UMBRAL) {
 				HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
@@ -206,17 +212,18 @@ int main(void)
 			}
 		}
 
-		if (HAL_GetTick() - heartbeat_last_tick_read > 500) {
-			heartbeat_last_tick_read = HAL_GetTick();
-			heartbeat_is_blinking = !heartbeat_is_blinking;
-		}
+		if (is_active_obstacle_alarm) {
+			if (HAL_GetTick() - alarm_last_tick_read > ALARM_INTERVALE_MS) {
+				alarm_last_tick_read = HAL_GetTick();
+				alarm_is_blinking = !alarm_is_blinking;
+			}
 
-		if (heartbeat_is_blinking) {
-			HAL_GPIO_WritePin(LD6_GPIO_Port, LD6_Pin, GPIO_PIN_SET);
-		} else {
-			HAL_GPIO_WritePin(LD6_GPIO_Port, LD6_Pin, GPIO_PIN_RESET);
+			if (alarm_is_blinking) {
+				HAL_GPIO_WritePin(LD5_GPIO_Port, LD5_Pin, GPIO_PIN_SET);
+			} else {
+				HAL_GPIO_WritePin(LD5_GPIO_Port, LD5_Pin, GPIO_PIN_RESET);
+			}
 		}
-
 	}
   /* USER CODE END 3 */
 }
@@ -265,7 +272,7 @@ void SystemClock_Config(void)
 /* USER CODE BEGIN 4 */
 
 void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim) {
-	// hcsr04_tim_ic_callback(&hcsr04_sensor, htim);
+	hcsr04_tim_ic_callback(&hcsr04_sensor, htim);
 }
 
 /* USER CODE END 4 */
