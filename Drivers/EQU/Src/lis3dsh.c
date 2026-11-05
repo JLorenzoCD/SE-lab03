@@ -20,7 +20,7 @@
   */
 
 /* Includes ------------------------------------------------------------------*/
-#include "lis3dsh.h"
+#include <lis3dsh.h>
 
 /** @addtogroup BSP
   * @{
