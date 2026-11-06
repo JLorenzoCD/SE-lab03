@@ -1,4 +1,16 @@
+# Laboratorio 3: Sensores y Librerias
+
+- Materia: Sistemas de instrumentalización - Sistemas Embebidos - Famaf
+- Alumno: José Lorenzo Canovas
+- Año: 2026
+- Microcontrolador utilizado: STM32F407G-Disc1
+
+---
+
+> Nota: Las explicaciones de las implementaciones se colocaron en comentarios. Para optimizar la lectura del informe y evitar redundancias, las explicaciones de código y conclusiones de los primeros ejercicios se aplican a los desafíos que les siguen, detallando en estos últimos únicamente las modificaciones y comportamientos novedosos.
+
 ## 3.1 - Desafío 1: HC-SR04
+Añadir y utilizar esta librería fue relativamente simple, ya que lo vimos en clases. Tuve que aprender como añadir los paths para que el STM32CubeIDE me tomase los includes. En un comienzo no me funcionaba, ya que no se tomaba unos ms entre medición, lo cual hacia que los leds tuviesen un comportamiento no deseado, por lo que la medición actualmente se realiza cada 100ms. Ademas, termine colocando un timeout para que se haga de nuevo la medición en caso de algún problema.
 
 ```c
 // ...
@@ -39,10 +51,13 @@ int main(void)
 
             HAL_GPIO_WritePin(LD5_GPIO_Port, LD3_Pin|LD4_Pin|LD5_Pin|LD6_Pin, GPIO_PIN_RESET);
             if (distance < 20.0) {
+				// Enciende el LED Rojo (Zona de Peligro).
                 HAL_GPIO_WritePin(LD5_GPIO_Port, LD5_Pin, GPIO_PIN_SET);
             } else if (distance < 50.0) {
+				// Enciende el LED Naranja (Zona de Precaución).
                 HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
             } else {
+				// Enciende el LED Verde (Zona Segura).
                 HAL_GPIO_WritePin(LD4_GPIO_Port, LD4_Pin, GPIO_PIN_SET);
             }
         } else if (is_measurement && (HAL_GetTick() - last_tick > 150)) {
@@ -65,6 +80,7 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim){
 ```
 
 ## 3.2 - Desafío 2: LM35
+A diferencia del desafío anterior, no coloque un timeout a ningún sensor ya que este código estaba pensado principalmente para revisarlo en modo debug. En una aplicación real, seria recomendable hacerlo. El código a continuación solo muestra el desafió no bloqueante, ya que el código necesario para ejecutarlo en modo bloqueante es trivial.
 
 ```c
 // ...
@@ -122,6 +138,13 @@ int main(void)
 ```
 
 ## 3.3 - Desafío 3: El Acelerómetro
+Para mi, el principal desafió que tuve fue buscar el código para hacerlo funcionar (un LLM ayudo) y luego fue ver donde meter los archivos. Aunque luego en clases, gracias a la explicación del profe, me di cuenta que hice cualquiera.
+
+Sobre el código, tuve que ponerme a probar y jugar con el micro para ver que umbral ponerle a los ejes x e y. En el acelerómetro, termine por no utilizar el led azul, ya que se ponía a titilar por el uso del heartbeat. E intentar poner lógica para que el acelerómetro no me utilizarse el led azul cuando el heartbeat esta apagado, era lo mismo que no utilizarlo.
+
+Cuando se tenia el heartbeat bloqueante, entonces el acelerómetro no reaccionaba a los cambios de la inclinación durante esos 500ms. Y esto seria lo mismo que hacer mediciones cada 500ms. Por lo cual, si en una aplicación sucede algo similar, las consecuencias serian:
+1. La aplicación no funciona como se espera, ya que se pierde tiempo de muestreo.
+2. Perdida de dinero si se busco hardware rápido par hacer muchas mediciones, ya que se termina realizando pocas por bloqueos del software (posiblemente comprable a un hardware mas simple y económico).
 
 ```c
 // ...
@@ -189,6 +212,8 @@ int main(void)
 ```
 
 ## 3.4 - Desafío 4: El Super-loop y la Integración Total
+Termine moviendo numero mágicos a macros (intervalos de muestreo, umbrales de los ejes del acelerómetro) para mejorar legibilidad. Coloque lógica para que si se esta parpadeando el led rojo (por obstáculo a una distancia menor de 15cm), entonces el led rojo no se utilize en el acelerómetro (evitar parpadeos no deseados).
+
 ```c
 // ...
 #include "stm32f4_discovery_accelerometer.h"
@@ -254,6 +279,7 @@ int main(void)
 			float distance = hcsr04_get_distance_cm(&hcsr04_sensor);
 
 			if (distance > 15.0) {
+				// Enciende el LED Rojo (Zona de Peligro).
 				is_active_obstacle_alarm = 0;
 				alarm_is_blinking = 0;
 			} else {
@@ -310,6 +336,7 @@ int main(void)
 			}
 		}
 
+		// Lógica del parpadeo del led rojo por obstáculo a menos de 15cm
 		if (is_active_obstacle_alarm) {
 			if (HAL_GetTick() - alarm_last_tick_read > ALARM_INTERVALE_MS) {
 				alarm_last_tick_read = HAL_GetTick();
